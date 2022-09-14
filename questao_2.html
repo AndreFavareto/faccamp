@@ -1,0 +1,373 @@
+<p>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+<script src="https://unpkg.com/mustache@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.3.6/dist/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</p>
+<p><video width="300" height="150" id="player" controls="controls" autoplay="autoplay"></video> <canvas id="snapshot" style="display: none;" width="640" height="480"></canvas></p>
+<p>
+<script>
+    var player = document.getElementById('player');
+    var snapshotCanvas = document.getElementById('snapshot');
+
+    var handleSuccess = function(stream) {
+        // Attach the video stream to the video element and autoplay.
+        player.srcObject = stream;
+
+        // Trigger the actions
+        actions.forEach(actionObject => {
+            console.log(actionObject.delay);
+            setTimeout(actionObject.action, actionObject.delay);
+        });
+    };
+	
+	var groupBy = function(xs, key) {
+		return xs.reduce(function(rv, x) {
+			(rv[x[key]] = rv[x[key]] || []).push(x);
+			return rv;
+		}, {});
+	};
+	
+	var median =  function(arr) {
+        const middle = (arr.length + 1) / 2;
+  
+        // Avoid mutating when sorting
+        const sorted = [...arr].sort((a, b) => Number(a.value) - Number(b.value));
+        const isEven = sorted.length % 2 === 0;
+  
+        return isEven ? (Number(sorted[middle - 1.5].value)
+            + Number(sorted[middle - 0.5].value)) / 2 :
+            Number(sorted[middle - 1].value);
+    }
+
+    const emotions = [];
+    const actions = [{
+            delay: 3000, // 3 seconds 1
+            action: captureEmotion
+        },
+        {
+            delay: 7000, // 7 seconds 2
+            action: captureEmotion
+        },
+        {
+            delay: 11000, // 11 seconds 3
+            action: captureEmotion
+        },
+        {
+            delay: 15000, // 15 seconds 4
+            action: captureEmotion
+        },
+		{
+            delay: 19000, // 19 seconds 5
+            action: captureEmotion
+        },
+		{
+            delay: 23000, // 23 seconds 6
+            action: captureEmotion
+        },        
+		{
+            delay: 27000, // 27 seconds 7
+            action: captureEmotion
+        },
+		{
+            delay: 31000, // 31 seconds 8
+            action: captureEmotion
+        }, 
+		{
+            delay: 35000, // 35 seconds 9
+            action: captureEmotion
+        },
+		{
+            delay: 39000, // 39 seconds 10
+            action: captureEmotion
+        },
+        {
+            delay: 43000, // 43 seconds display
+            action: displayEmotions
+        }
+    ];
+
+    function captureEmotion() {
+        const image = captureImage();
+        processImage(image);
+    }
+
+    function displayEmotions() {
+		let question = [];
+		
+        emotions.forEach(emotionObject => {
+			let firstPredominant = Object.entries(emotionObject.emotion).sort(function(a,b) { return b[1] - a[1] })[0];		
+			let firstPredominantText = firstPredominant[0];
+			let firstPredominantValue = firstPredominant[1];
+			
+			let firstPredominantKeyValue = {
+				text: firstPredominantText, 
+				value: (firstPredominantValue == 0 || firstPredominantValue == 1) ? firstPredominantValue + '.000' : firstPredominantValue 
+			};
+			
+			let secondPredominant = Object.entries(emotionObject.emotion).sort(function(a,b) { return b[1] - a[1] })[1];
+			let secondPredominantText = secondPredominant[0];
+			let secondPredominantValue = secondPredominant[1];
+			
+			let secondPredominantKeyValue = {
+				text: secondPredominantText, 
+				value: (secondPredominantValue == 0 || secondPredominantValue == 1) ? secondPredominantValue + '.000' : secondPredominantValue
+			};
+
+			let renderedEmotion = getEmotionText(firstPredominantKeyValue, secondPredominantKeyValue);
+            let template = document.getElementById('emotions-template').innerHTML;
+            let rendered = Mustache.render(template, {
+                image: emotionObject.image,
+                emotion: renderedEmotion
+            });
+			
+            document.getElementById('emotionsArea').innerHTML += rendered;
+			
+			let predominantText1 = " - First: " + firstPredominantKeyValue.text + " (" + firstPredominantKeyValue.value +")";
+			let predominantText2 = " - Second: " + secondPredominantKeyValue.text + " (" + secondPredominantKeyValue.value +")";
+
+			question.push({
+				image: emotionObject.image,
+				time: emotionObject.time,
+				firstPredominant: predominantText1,
+				secondPredominant: predominantText2,
+				firstPredominantKeyValue: firstPredominantKeyValue,
+				secondPredominantKeyValue: secondPredominantKeyValue
+			});
+        });
+		
+		var statistics = extractStatistics(question);
+		
+		window.localStorage.setItem('question2', JSON.stringify({ 
+			question: question,
+			statistics: statistics
+		}));
+    }
+	
+	function extractStatistics(question) {
+		let [primary, secondary, primaryMode, secondaryMode, primaryAverage, 
+			secondaryAverage, primaryMedian, secondaryMedian] = [[], [], [], [], [], [], [], []];
+		
+		question.forEach(questionObject => {
+			primary.push(questionObject.firstPredominantKeyValue);
+			secondary.push(questionObject.secondPredominantKeyValue);
+		});
+		
+		let groupByPrimary = groupBy(primary, 'text');
+		let groupBySecondary = groupBy(secondary, 'text');
+		
+		Object.entries(groupByPrimary).forEach(obj => {
+			var sum = 0;
+			for (var i=0;i<obj[1].length;i++){ 
+				if(obj[1][i].value != null){    
+					sum += parseFloat(obj[1][i].value);
+				}
+			}
+			
+			primaryMode.push({
+				emotion: obj[0],
+				length: obj[1].length
+			});
+			
+			primaryAverage.push({
+				emotion: obj[0],
+				average: sum/obj[1].length
+			});
+			
+			primaryMedian.push({
+				emotion: obj[0],
+				median: median(obj[1])
+			});
+		});
+		
+		Object.entries(groupBySecondary).forEach(obj => {
+			var sum = 0;
+			for (var i=0;i<obj[1].length;i++){ 
+				if(obj[1][i].value != null){    
+					sum += parseFloat(obj[1][i].value);
+				}
+			}
+			
+			secondaryMode.push({
+				emotion: obj[0],
+				length: obj[1].length
+			});
+			
+			secondaryAverage.push({
+				emotion: obj[0],
+				average: sum/obj[1].length
+			});
+			
+			secondaryMedian.push({
+				emotion: obj[0],
+				median: median(obj[1])
+			});
+		});
+
+		return {
+			primary: { 
+				mode: primaryMode,
+				average: primaryAverage,
+				median: primaryMedian
+			},
+			secondary: { 
+				mode: secondaryMode,
+				average: secondaryAverage,
+				median: secondaryMedian
+			}
+		};
+	}
+	
+    function getPredominantEmotion(emotions) {
+        let emotionText = null;
+        let emotionValue = 0;
+
+        for (var emotion in emotions) {
+            if (emotions[emotion] > emotionValue) {
+                emotionText = emotion;
+                emotionValue = (emotions[emotion] == 0 || emotions[emotion] == 1) ? emotions[emotion] + '.000' : emotions[emotion];
+            }
+        }
+
+        return {
+            text: emotionText,
+            value: emotionValue
+        };
+    }
+
+    function getEmotionText(firstPredominantKeyValue, secondPredominantKeyValue) {
+        if (firstPredominantKeyValue.text == null) {
+			firstPredominantKeyValue.text = "none";
+			firstPredominantKeyValue.value = firstPredominantKeyValue.value + '.000'
+		}
+		
+		if (secondPredominantKeyValue.text == null) {
+			secondPredominantKeyValue.text = "none";
+			secondPredominantKeyValue.value = secondPredominantKeyValue.value + '.000'
+		}
+		
+        var template = document.getElementById('emotion-list-template').innerHTML;
+		
+        return Mustache.render(template, {
+            emotions: [
+                firstPredominantKeyValue,
+                secondPredominantKeyValue
+            ]
+        });
+    }
+	
+    function captureImage() {
+        var context = snapshot.getContext('2d');
+        // Draw the video frame to the canvas.
+        context.drawImage(player, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+
+        return snapshotCanvas.toDataURL("image/jpeg");
+    }
+
+    function processImage(image) {
+		var time = (actions[emotions.length].delay/1000);
+		console.log(time);
+	
+        // Replace <Subscription Key> with your valid subscription key.
+        var subscriptionKey = "4b96bb7c950840caa9279d2c5a18f3e4";
+
+        var uriBase = "https://teste-reconhecimento.cognitiveservices.azure.com/face/v1.0/detect";
+
+        // Request parameters.
+        var params = {
+            "returnFaceId": "true",
+            "returnFaceLandmarks": "false",
+            "returnFaceAttributes": "age,gender,headPose,smile,facialHair,glasses,emotion," +
+                "hair,makeup,occlusion,accessories,blur,exposure,noise"
+        };
+
+        // Perform the REST API call.
+        $.ajax({
+                url: uriBase + "?" + $.param(params),
+
+                // Request headers.
+                beforeSend: function(xhrObj) {
+                    xhrObj.setRequestHeader("Content-Type", "application/octet-stream");
+                    xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
+                },
+                processData: false,
+                type: "POST",
+
+                // Request body.
+                data: makeblob(image), //'{"Url": "'+JSON.stringify(image.src)+'"}'
+            })
+            .done(function(data) {
+                emotions.push({
+                    image,
+					time,
+                    emotion: typeof data !== 'undefined' ? data[0].faceAttributes.emotion : []
+                });
+
+                // Show formatted JSON on webpage.
+                $("#responseTextArea").val(JSON.stringify(data, null, 2));
+            })
+            .fail(function(jqXHR, textStatus, errorThrown) {
+                // Display error message.
+                var errorString = (errorThrown === "") ?
+                    "Error. " : errorThrown + " (" + jqXHR.status + "): ";
+                errorString += (jqXHR.responseText === "") ?
+                    "" : (jQuery.parseJSON(jqXHR.responseText).message) ?
+                    jQuery.parseJSON(jqXHR.responseText).message :
+                    jQuery.parseJSON(jqXHR.responseText).error.message;
+                alert(errorString);
+            });
+    };
+
+    function makeblob(dataURL) {
+        var BASE64_MARKER = ';base64,';
+
+        if (dataURL.indexOf(BASE64_MARKER) == -1) {
+            var parts = dataURL.split(',');
+            var contentType = parts[0].split(':')[1];
+            var raw = decodeURIComponent(parts[1]);
+            return new Blob([raw], {
+                type: contentType
+            });
+        }
+        var parts = dataURL.split(BASE64_MARKER);
+        var contentType = parts[0].split(':')[1];
+        var raw = window.atob(parts[1]);
+        var rawLength = raw.length;
+
+        var uInt8Array = new Uint8Array(rawLength);
+
+        for (var i = 0; i < rawLength; ++i) {
+            uInt8Array[i] = raw.charCodeAt(i);
+        }
+
+        return new Blob([uInt8Array], {
+            type: contentType
+        });
+    }
+
+    // Enable webcam control
+    navigator.mediaDevices.getUserMedia({
+        video: true
+    }).then(handleSuccess);
+
+    if (navigator.mediaDevices.getUserMedia == true) {
+        handleSuccess();
+    }
+</script>
+<script id="emotions-template" type="x-tmpl-mustache">
+    <div class="emotion" style="display: inline-block; width: 120px; border: 1px solid #ccc; padding: 5px; margin-right: 5px;">
+        <img width="120" src="{{image}}" />
+        <span>{{{emotion}}}</span>
+    </div>
+</script>
+<script id="emotion-list-template" type="x-tmpl-mustache">
+    As emoções predominantes são:
+    <ul>
+        {{#emotions}}
+        <li>{{text}} ({{value}})</li>
+        {{/emotions}}
+    </ul>
+</script>
+</p>
+<div id="emotionsArea"></div>
